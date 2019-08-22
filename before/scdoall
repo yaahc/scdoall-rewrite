@@ -1,0 +1,108 @@
+#!/bin/bash
+# SCQAD TEST: scdoallTest
+#
+argumentList=("${@}")
+
+# isolate obsolete shell environment
+(
+    # REDACTED
+)
+
+# usage
+function usage() {
+    cat <<EOF
+Usage: scdoall [opts] <command>
+       --help            (optional) display this help message and exit
+       --quiet           (optional) don't display a banner for each host
+       --no-indent       (optional) don't indent output
+       --timeout         (optional) only wait this long for ssh connect (default 5s)
+       --                (optional) set the last command-line argument
+
+Option Aliases:
+       --help            -help,-h,-?
+       --quiet           -quiet,-q
+
+EOF
+    exit 13
+}
+
+# get list of nodes in the cluteer
+if ! all_hosts="$(awk '{print $2}' redacted.txt) $SCDOALL_TEST_UNREACHABLE_HOST" || [ -z "$all_hosts" ]; then
+    echo "Error: Cannot get list of nodes"
+    exit 1
+fi
+
+# var defaults
+N_HOSTS=$(echo "$all_hosts" | wc | awk '{print $2}')
+
+if [ "$N_HOSTS" -eq 0 ]; then
+    echo "Error: Cluster does not exist."
+    exit 1
+fi
+
+while [[ -n ${argumentList[0]} && ${argumentList[0]:0:1} == '-' ]]; do
+    case "${argumentList[0]}" in
+    --quiet | -quiet | -q)
+        header=""
+        ;;
+    --timeout)
+        timeout=${argumentList[1]}
+        unset "argumentList[0]"
+        argumentList=("${argumentList[@]}")
+        ;;
+    --no-indent)
+        marginString=""
+        ;;
+    --help | -help | -h | -\?)
+        usage
+        ;;
+    --)
+        unset "argumentList[0]"
+        argumentList=("${argumentList[@]}")
+        break
+        ;;
+    *)
+        echo "Unknown argument: $1"
+        usage
+        ;;
+    esac
+    unset "argumentList[0]"
+    argumentList=("${argumentList[@]}")
+done
+
+# validate command
+if [[ -z ${argumentList[*]} ]]; then
+    echo "You must specify a command to run"
+    usage
+fi
+
+declare -p header >&/dev/null || header="Running (${argumentList[*]}) \$BACKPLANE_ENV"
+declare -p marginString >&/dev/null || marginString='    '
+
+# nodeArray=($all_hosts)
+mapfile -t nodeArray <<<"$all_hosts"
+: "${timeout:=5}"
+sshargs=()
+for node in "${nodeArray[@]}"; do
+    sshargs+=("-S \"ssh -o ConnectTimeout=$timeout $node\"")
+done
+if [[ ${#argumentList[@]} -gt 1 ]]; then
+    user_cmd="$(declare -p argumentList); \"\${argumentList[@]}\""
+else
+    user_cmd="${argumentList[*]}"
+fi
+
+export PARALLEL='--no-notice'
+bash -c "$(
+    cat <<EOF
+function header_cmd() {
+    echo "$header"
+}
+function user_cmd() {
+    $user_cmd
+}
+export -f user_cmd
+export -f header_cmd
+parallel --env user_cmd --env header_cmd ${sshargs[@]} -k --nonall "set -o pipefail; header_cmd; user_cmd | sed \"s/^/$marginString/\""
+EOF
+)"

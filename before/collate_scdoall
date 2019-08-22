@@ -1,0 +1,18 @@
+#!/bin/bash
+function collate_scdoall {
+    gawk '
+    /^Running/ { node = $NF; next; }
+    {
+        if (match($1, /....-..-../, d) && match($2, /..:..:../, t)) {
+            sub($1 " " $2, $1 " " $2 " " node);
+            old1 = $1
+            old2 = $2
+        } else {
+            sub(/^/, old1 " " old2 " " node);
+        }
+        sub(/^\s+/, "");
+        print $0
+    }
+    ' | sort
+}
+collate_scdoall
